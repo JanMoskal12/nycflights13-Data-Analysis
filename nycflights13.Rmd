@@ -1,0 +1,336 @@
+---
+title: "nycflights13"
+author: "Jan Moskal"
+date: "2023-08-19"
+output: github_document
+---
+
+```{r setup, include=FALSE, message=FALSE, error=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Loading libraries and data
+
+library(tidyverse)
+library(nycflights13)
+library(ggthemes)
+library(gganimate)
+library(scales)
+library(patchwork)
+library(extrafont)
+library(plotly)
+
+flights_df <- nycflights13::flights
+weather_df <- nycflights13::weather
+planes_df <- nycflights13::planes
+
+flights_and_wheter_df <- left_join(flights, weather, by = c("origin", "year", "month", "day", "hour"))
+flights_weather_planes <- left_join(flights_and_wheter_df, planes, by = "tailnum")
+flights_weather_planes <- flights_weather_planes %>%
+  select(-time_hour.y) %>%
+  rename(built_year = year.y)
+```
+
+
+ What is the average departure and arrival delay?
+```{r}
+flights %>% 
+  summarise(avg_dep_delay = mean(dep_delay, na.rm = TRUE),
+            avg_arr_delay = mean(arr_delay, na.rm = TRUE), 
+            median_dep_delay = median(dep_delay, na.rm = TRUE),
+            median_arr_delay = median(arr_delay, na.rm = TRUE))
+
+```
+
+
+ Is there any relationship between delay and time of day, day of the week, or month?
+```{r}
+# ------------------------------------------------------------------------------------------------
+
+flights %>%
+  group_by(hour = sched_dep_time %/% 100) %>%
+  summarize(avg_delay = mean(arr_delay, na.rm = TRUE)) %>%
+  ggplot(aes(x = hour, y = avg_delay)) +
+  geom_histogram(stat = "identity")
+# Late night and early morning flights are less often delayed.
+
+flights %>%
+  group_by(month) %>%
+  summarise(avg_month_delay = mean(arr_delay, na.rm = TRUE)) %>%
+  ggplot(aes(x = month <- factor(month, labels = month.name), y = avg_month_delay, fill = as.factor(month))) +
+  geom_bar(stat = "identity") +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(size = 15, color = "red", hjust = 0.5)
+  ) +
+  labs(
+    title = "Average delay in each month",
+    x = NULL,
+    y = "Average delay"
+  )
+# Flights are delayed most in holidays and December and least in autumn
+```
+
+
+ Is there a correlation between route length and delay?
+ How does seasonality impact flight delays?
+```{r}
+# ------------------------------------------------------------------------------------------------
+flights %>%
+  mutate(distance = cut(nycflights13::flights$distance,
+    breaks = seq(0, 5000, by = 1000),
+    labels = c("1000", "2000", "3000", "4000", "5000")
+  )) %>%
+  group_by(distance) %>%
+  summarise(avg_arr_delay = mean(arr_delay, na.rm = TRUE)) %>%
+  ggplot(aes(x = distance, y = avg_arr_delay)) +
+  geom_bar(stat = "identity")
+
+
+flights %>%
+  mutate(distance = cut(nycflights13::flights$distance,
+    breaks = seq(0, 5000, by = 1000),
+    labels = c("1000", "2000", "3000", "4000", "5000")
+  )) %>%
+  group_by(distance) %>%
+  summarise(avg_dep_delay = mean(dep_delay, na.rm = TRUE)) %>%
+  ggplot(aes(x = distance, y = avg_dep_delay)) +
+  geom_bar(stat = "identity")
+
+# Long-distance flights often make up for the flight delay during the flight
+# No significant relationship between dep_delay and distance
+```
+
+
+Which airlines have the highest number of flights?
+```{r}
+flights %>% 
+  group_by(carrier) %>% 
+  count(sort = TRUE) %>% 
+  ggplot(aes(x = fct_reorder(carrier, n), y = n, fill = carrier)) +
+  geom_bar(stat= "identity") +
+  theme(legend.position = "none") +
+  labs(x = NULL, 
+       y = "Count") +
+  scale_y_continuous(labels = label_number_si())
+  
+```
+
+
+ Is there a relationship between the airline and delay?
+```{r}
+# ------------------------------------------------------------------------------------------------
+
+flights %>%
+  group_by(carrier) %>%
+  summarise(avg_delay = mean(arr_delay, na.rm = TRUE)) %>%
+  ggplot(aes(x = reorder(carrier, avg_delay), y = avg_delay, fill = carrier)) +
+  geom_bar(stat = "identity")
+
+# Flight delays depends on carriers
+```
+
+ Is there a relationship between the origin and delay?
+```{r}
+flights %>%
+  group_by(origin) %>%
+  summarize(avg_delay = mean(arr_delay, na.rm = TRUE)) %>%
+  ggplot(aes(x = origin, y = avg_delay, fill = origin)) +
+  geom_bar(stat = "identity") +
+  theme(legend.position = "none")
+
+# Flight delay kinda depends on origin
+```
+
+
+ What are the most popular flight routes in the dataset?
+```{r}
+flights %>% 
+  group_by(origin, dest) %>% 
+  count(sort = TRUE)
+
+flights %>% 
+  group_by(origin, dest) %>% 
+  count(sort = TRUE) %>% 
+  ungroup() %>% 
+  mutate(x = row_number()) %>% 
+  ggplot(aes(x = x, y = n)) +
+  geom_histogram(stat = "identity")
+
+```
+
+
+ Which routes experience the most delays?
+```{r}
+# Total dep_delay  for each route
+flights %>% 
+  group_by(origin, dest) %>% 
+  summarise(total_delay = sum(dep_delay, na.rm = TRUE)) %>% 
+  arrange(desc(total_delay))
+
+# Total arr_delay for each route
+flights %>% 
+  group_by(origin, dest) %>% 
+  summarise(total_delay = sum(arr_delay, na.rm = TRUE)) %>% 
+  arrange(desc(total_delay))
+
+# Average dep_delay for each route
+flights %>% 
+  group_by(origin, dest) %>% 
+  summarise(avg_delay = mean(dep_delay, na.rm = TRUE)) %>% 
+  arrange(desc(avg_delay))
+
+# Average arr_delay for each route
+flights %>% 
+  group_by(origin, dest) %>% 
+  summarise(avg_delay = mean(arr_delay, na.rm = TRUE)) %>% 
+  arrange(desc(avg_delay))
+```
+
+
+ Which airport has the most flights?
+```{r}
+flights %>% 
+  count(origin, sort = TRUE)
+```
+ 
+ 
+ Are there airports where delays are more frequent?
+```{r}
+flights %>% 
+  mutate(delayed = arr_delay > 0) %>% 
+  group_by(origin) %>% 
+  summarise(prop_delayed = mean(delayed, na.rm = TRUE)) %>% 
+  ggplot(aes(x = origin, y = prop_delayed, fill = origin)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(name = "Proportion of delayed to all", labels = label_percent()) +
+  theme(legend.position = "none") +
+  labs(x = "Origin")
+
+flights %>% 
+  group_by(origin) %>% 
+  summarise(avg_delay = mean(arr_delay, na.rm = TRUE),
+            total_delay = sum(arr_delay, na.rm = TRUE))
+
+```
+ 
+ 
+ Which airports are busiest at different times of the day?
+```{r}
+flights %>% 
+  group_by(hour) %>% 
+  ggplot(aes(x = hour)) +
+  geom_bar(aes(fill = origin)) +
+    facet_wrap(~ origin) +
+  theme(legend.position = "none")
+```
+
+
+ What are the most commonly used aircraft types in the area?
+```{r}
+planes_df <- planes %>% 
+  select(tailnum, type)
+flights_and_planes <- left_join(flights, planes_df, by = "tailnum")
+
+flights_and_planes %>% 
+  count(type, sort = TRUE)
+```
+ 
+ Do different aircraft types have different delay rates?
+```{r}
+flights_and_planes %>% 
+  drop_na(type) %>% 
+  group_by(type) %>% 
+  summarise(avg_arr_delay = mean(arr_delay, na.rm = TRUE),
+            avg_dep_delay = mean(dep_delay, na.rm = TRUE))
+```
+ 
+
+Does the age of aircraft impact their performance?
+```{r}
+ planes_df1 <- planes %>% 
+  select(tailnum, type, year) %>% 
+  rename(plane_year = year)
+flights_and_planes1 <- left_join(flights, planes_df1, by = "tailnum")
+
+
+flights_and_planes1 %>% 
+  mutate(speed = distance / (air_time/ 60)) %>% 
+  group_by(plane_year) %>% 
+  summarise(avg_delay = mean(arr_delay, na.rm = TRUE),
+            avg_speed = mean(speed, na.rm = TRUE)) %>% 
+  arrange(desc(avg_delay))
+```
+
+
+ What were the weather conditions on different quarters, and what impact did they have on flight delays?
+ Was there a correlation between delays and specific weather variables such as precipitation, wind, or visibility?
+```{r}
+weather %>% 
+  group_by(quarter = case_when(
+   month %in% c(12, 1, 2) ~ "Winter",
+   month %in% c(9, 10, 11) ~ "Autumn",
+   month %in% c(8, 7, 6) ~ "Summer",
+   month %in% c(3, 4, 5) ~ "Spring",
+  )) %>% 
+  summarise(avg_visiblity = mean(visib, na.rm = TRUE)) %>% 
+  arrange(desc(avg_visiblity))
+
+weather %>% 
+  group_by(quarter = case_when(
+   month %in% c(12, 1, 2) ~ "Winter",
+   month %in% c(9, 10, 11) ~ "Autumn",
+   month %in% c(8, 7, 6) ~ "Summer",
+   month %in% c(3, 4, 5) ~ "Spring",
+  )) %>% 
+  summarise(avg_precip = mean(precip, na.rm = TRUE),
+            total_precip = sum(precip, na.rm = TRUE)) %>% 
+  arrange(desc(avg_precip))
+
+weather %>% 
+  group_by(quarter = case_when(
+   month %in% c(12, 1, 2) ~ "Winter",
+   month %in% c(9, 10, 11) ~ "Autumn",
+   month %in% c(8, 7, 6) ~ "Summer",
+   month %in% c(3, 4, 5) ~ "Spring",
+  )) %>% 
+  summarise(avg_wind_speed = mean(wind_speed, na.rm = TRUE)) %>% 
+  arrange(desc(avg_wind_speed))
+
+
+# Visibilty is worst at Winter, rainfall are largest at Summer, windspeed is lowest at Summer
+
+weather_df <- weather %>% 
+  select(origin:hour, wind_speed, precip, visib)
+
+flights_weather <- left_join(flights, weather_df, by = c("origin", "year", "month", "day", "hour"))
+
+flights_weather %>% 
+  ggplot(aes(x = precip, y = arr_delay)) +
+  geom_point()
+
+# I can not see relationship between precip and delay of flight
+
+flights_weather %>% 
+  drop_na(visib) %>% 
+  group_by(visib) %>% 
+  summarise(avg_delay = mean(dep_delay, na.rm = TRUE)) %>% 
+  ggplot(aes(x = as.factor(visib), y = avg_delay)) +
+  geom_bar(stat = "identity")
+
+flights_weather %>% 
+  drop_na(precip) %>% 
+  group_by(precip) %>% 
+  summarise(avg_delay = median(dep_delay, na.rm = TRUE)) %>% 
+  ggplot(aes(x = precip, y = avg_delay)) +
+  geom_histogram(stat = "identity") 
+
+flights_weather %>% 
+  drop_na(wind_speed) %>% 
+  group_by(wind_speed) %>% 
+  summarise(avg_delay = mean(dep_delay, na.rm = TRUE)) %>% 
+  ggplot(aes(x = wind_speed, y = avg_delay)) +
+  geom_histogram(stat = "identity") 
+```
+ 
